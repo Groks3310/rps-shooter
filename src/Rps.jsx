@@ -12,22 +12,25 @@ const MODES = {
 };
 
 const RULES = [
-  { icon: "🪨", text: "Rock beats Scissors" },
-  { icon: "📄", text: "Paper beats Rock" },
-  { icon: "✂️", text: "Scissors beats Paper" },
-  { icon: "❤️", text: "Lose a life if a ball escapes" },
+  { icon: "🛡️", text: "Bosses have 3HP & change type when hit!" },
+  { icon: "📈", text: "Speed increases as your score rises" },
+  { icon: "⚠️", text: "Misfiring resets your combo" },
   { icon: "🔥", text: "5x Combo recovers 1 Life!" },
-  { icon: "👹", text: "Boss balls are worth 5 points" },
 ];
 
 // ── Helpers ──
-function createBall(arenaW, arenaH, isBoss = false, speedMult = 1) {
+function createBall(arenaW, arenaH, isBoss = false, speedMult = 1, currentScore = 0) {
   const type = TYPES[Math.floor(Math.random() * 3)];
-  const speed = (2 + Math.random() * 2) * speedMult * (isBoss ? 0.6 : 1);
+  // Scaling Difficulty: increase speed by 5% for every 10 points
+  const scale = 1 + (Math.floor(currentScore / 10) * 0.05);
+  const speed = (2 + Math.random() * 2) * speedMult * scale * (isBoss ? 0.5 : 1);
   const angle = Math.random() * Math.PI * 2;
+  
   return {
     id: Date.now() + Math.random(),
-    type, isBoss,
+    type, 
+    isBoss,
+    hp: isBoss ? 3 : 1, // Bosses need 3 hits
     x: arenaW * 0.1 + Math.random() * arenaW * 0.8,
     y: -30,
     vx: Math.cos(angle) * speed * 0.7,
@@ -107,7 +110,6 @@ export default function Rps() {
   const [mode, setMode] = useState("amateur");
   const [musicVol, setMusicVol] = useState(0.4);
 
-  // States for organized UI
   const [openSection, setOpenSection] = useState(null);
   const [isQuitting, setIsQuitting] = useState(false);
 
@@ -197,7 +199,8 @@ export default function Rps() {
       if (!playingRef.current) return;
       if (ballsRef.current.length < cfg.maxBalls) {
         const r = arenaRef.current?.getBoundingClientRect();
-        ballsRef.current = [...ballsRef.current, createBall(r.width, r.height, false, cfg.speedMult)];
+        // Passing scoreRef.current for scaling difficulty
+        ballsRef.current = [...ballsRef.current, createBall(r.width, r.height, false, cfg.speedMult, scoreRef.current)];
         setBalls([...ballsRef.current]);
       }
     }, cfg.spawnMs);
@@ -230,12 +233,83 @@ export default function Rps() {
     bossRef.current = setInterval(() => {
         if (!playingRef.current) return;
         const r = arenaRef.current?.getBoundingClientRect();
-        ballsRef.current = [...ballsRef.current, createBall(r.width, r.height, true, cfg.speedMult)];
+        ballsRef.current = [...ballsRef.current, createBall(r.width, r.height, true, cfg.speedMult, scoreRef.current)];
         setBalls([...ballsRef.current]);
-        showWaveBanner("👹 Boss wave!");
+        showWaveBanner("👹 Shielded Boss!");
         const ctx = getSfxCtx(); if (ctx) playTone(ctx, 80, "sawtooth", 0.5, 0.35);
     }, cfg.bossMs);
   }, [endGame, showWaveBanner, triggerFlash, getSfxCtx, startMusic]);
+
+  const shoot = useCallback((choice) => {
+    if (!playingRef.current || isQuitting) return;
+    
+    // Find balls that this choice beats
+    const targets = ballsRef.current.filter(b => beats(choice, b.type));
+    const ctx = getSfxCtx();
+
+    if (targets.length > 0) {
+      const mult = getMultiplier(comboRef.current + 1);
+      let pointsGained = 0;
+
+      // Update balls: Bosses lose HP and change type, normal balls die
+      ballsRef.current = ballsRef.current.map(b => {
+        if (beats(choice, b.type)) {
+          if (b.isBoss && b.hp > 1) {
+            // Shielded Boss Logic: Change type and reduce HP
+            addPopup(b.x, b.y, "SHIELD HIT", "#f5c400");
+            if (ctx) playTone(ctx, 300, "square", 0.1, 0.15);
+            return { ...b, hp: b.hp - 1, type: TYPES[Math.floor(Math.random() * 3)] };
+          } else {
+            // Ball or Boss is destroyed
+            const val = b.isBoss ? 5 : 1;
+            pointsGained += val * mult;
+            addPopup(b.x, b.y, `+${val}${mult > 1 ? ` x${mult}` : ""}`, "#00e676");
+            return null; // Marked for removal
+          }
+        }
+        return b;
+      }).filter(b => b !== null);
+
+      // Apply score and combo
+      if (pointsGained > 0) {
+        scoreRef.current += pointsGained;
+        setScore(scoreRef.current);
+        const newCombo = Math.min(comboRef.current + 1, 5);
+        comboRef.current = newCombo;
+        setCombo(newCombo);
+        
+        if (newCombo === 5 && livesRef.current < 3) {
+          livesRef.current++;
+          setLives(livesRef.current);
+          const r = arenaRef.current?.getBoundingClientRect();
+          addPopup(r.width/2, r.height/2, "❤️ LIFE UP", "#ff4c5e");
+        }
+        triggerFlash("#00e676");
+        if (ctx) playTone(ctx, 520, "square", 0.08, 0.25);
+      }
+      setBalls([...ballsRef.current]);
+    } else {
+      // MISFIRE PENALTY: Lose points and reset combo instantly
+      scoreRef.current = Math.max(0, scoreRef.current - 2); 
+      setScore(scoreRef.current);
+      comboRef.current = 0; 
+      setCombo(0);
+      triggerFlash("#ff4c5e");
+      if (ctx) playTone(ctx, 100, "sine", 0.2, 0.3);
+    }
+  }, [addPopup, triggerFlash, getSfxCtx, isQuitting]);
+
+  useEffect(() => {
+    if (musicRef.current) musicRef.current.setVolume(musicVol * 0.18);
+  }, [musicVol]);
+
+  useEffect(() => {
+    if (sidebarOpen || isQuitting) {
+      playingRef.current = false;
+      stopAll();
+      musicRef.current?.pause();
+    }
+  }, [sidebarOpen, isQuitting, stopAll]);
 
   const startGame = useCallback(() => {
     stopAll(); stopMusic();
@@ -252,45 +326,6 @@ export default function Rps() {
       else setCountdown(n);
     }, 800);
   }, [startRound, stopAll, stopMusic]);
-
-  const shoot = useCallback((choice) => {
-    if (!playingRef.current || isQuitting) return;
-    const hits = ballsRef.current.filter(b => beats(choice, b.type));
-    const ctx = getSfxCtx();
-    if (hits.length > 0) {
-      const newCombo = Math.min(comboRef.current + 1, 5);
-      comboRef.current = newCombo; setCombo(newCombo);
-      if (newCombo === 5 && livesRef.current < 3) {
-        livesRef.current++; setLives(livesRef.current);
-        const r = arenaRef.current?.getBoundingClientRect();
-        addPopup(r.width/2, r.height/2, "❤️ LIFE UP", "#ff4c5e");
-      }
-      const mult = getMultiplier(newCombo);
-      const pts = hits.reduce((s, b) => s + (b.isBoss ? 5 : 1), 0) * mult;
-      scoreRef.current += pts; setScore(scoreRef.current);
-      hits.forEach(b => addPopup(b.x, b.y, `+${b.isBoss ? 5 : 1}${mult > 1 ? ` x${mult}` : ""}`, "#00e676"));
-      ballsRef.current = ballsRef.current.filter(b => !beats(choice, b.type));
-      setBalls([...ballsRef.current]);
-      triggerFlash("#00e676");
-      if (ctx) playTone(ctx, 520, "square", 0.08, 0.25);
-    } else {
-      scoreRef.current = Math.max(0, scoreRef.current - 1); setScore(scoreRef.current);
-      comboRef.current = 0; setCombo(0);
-      triggerFlash("#ff4c5e");
-    }
-  }, [addPopup, triggerFlash, getSfxCtx, isQuitting]);
-
-  useEffect(() => {
-    if (musicRef.current) musicRef.current.setVolume(musicVol * 0.18);
-  }, [musicVol]);
-
-  useEffect(() => {
-    if (sidebarOpen || isQuitting) {
-      playingRef.current = false;
-      stopAll();
-      musicRef.current?.pause();
-    }
-  }, [sidebarOpen, isQuitting, stopAll]);
 
   const confirmQuit = () => {
     stopAll();
@@ -340,7 +375,7 @@ export default function Rps() {
 
         <div className="sidebar-section">
             <div className="sidebar-section-title" onClick={() => toggleSection('rules')} style={{cursor: 'pointer', display: 'flex', justifyContent: 'space-between'}}>
-              Game Rules <span>{openSection === 'rules' ? '−' : '+'}</span>
+              Hardcore Rules <span>{openSection === 'rules' ? '−' : '+'}</span>
             </div>
             {openSection === 'rules' && (
               <div style={{marginTop: '10px'}}>
@@ -390,11 +425,15 @@ export default function Rps() {
 
         <div className="rps-arena" ref={arenaRef}>
           {flashColor && <div className="arena-flash" style={{ background: flashColor }} />}
-          {balls.map(b => <div key={b.id} className={`ball${b.isBoss ? " boss" : ""}`} style={{ left: b.x, top: b.y }}>{EMOJI[b.type]}</div>)}
+          {balls.map(b => (
+            <div key={b.id} className={`ball${b.isBoss ? " boss" : ""}`} style={{ left: b.x, top: b.y }}>
+                {EMOJI[b.type]}
+                {b.isBoss && <div className="boss-hp">{"●".repeat(b.hp)}</div>}
+            </div>
+          ))}
           {popups.map(p => <div key={p.id} className="popup" style={{ left: p.x, top: p.y, color: p.color }}>{p.text}</div>)}
           {waveBanner && <div className="wave-banner">{waveBanner}</div>}
 
-          {/* MAIN OVERLAYS */}
           {(phase !== "playing" || isQuitting) && (
             <div className="overlay">
               {isQuitting ? (
