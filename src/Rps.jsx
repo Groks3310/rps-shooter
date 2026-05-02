@@ -12,9 +12,7 @@ const MODES = {
 };
 
 const RULES = [
-  { icon: "🪨", text: "Rock beats Scissors" },
-  { icon: "📄", text: "Paper beats Rock" },
-  { icon: "✂️", text: "Scissors beats Paper" },
+  { icon: "⚠️", text: "5 Mismatches = Lose 1 Life" },
   { icon: "🛡️", text: "Bosses have 3HP & change type" },
   { icon: "👹", text: "Bosses spawn every 7 seconds" },
   { icon: "⚡", text: "Massive speed jump at 30 pts" },
@@ -24,8 +22,6 @@ const RULES = [
 // ── Helpers ──
 function createBall(arenaW, arenaH, isBoss = false, speedMult = 1, currentScore = 0) {
   const type = TYPES[Math.floor(Math.random() * 3)];
-  
-  // Scaling Logic
   let scale = 1 + (Math.floor(currentScore / 10) * 0.1);
   if (currentScore >= 30) scale *= 1.5; 
 
@@ -104,6 +100,7 @@ export default function Rps() {
   const [score, setScore] = useState(0);
   const [lives, setLives] = useState(3);
   const [combo, setCombo] = useState(0);
+  const [mismatch, setMismatch] = useState(0); // Tracking mismatches
   const [highScores, setHighScores] = useState(getHighScores);
   const [popups, setPopups] = useState([]);
   const [flashColor, setFlashColor] = useState(null);
@@ -122,6 +119,7 @@ export default function Rps() {
   const scoreRef    = useRef(0);
   const comboRef    = useRef(0);
   const livesRef    = useRef(3);
+  const mismatchRef = useRef(0); // Ref for sync logic
   const missedRef   = useRef(0);
   const spawnRef    = useRef(null);
   const moveRef     = useRef(null);
@@ -182,7 +180,6 @@ export default function Rps() {
     setPhase("playing");
     setIsQuitting(false);
     
-    // Music restoration
     try {
       const ctx = getAudioCtx(audioCtxRef);
       if (!musicRef.current) musicRef.current = new MusicEngine(ctx, "./sounds/background.mp3");
@@ -273,16 +270,33 @@ export default function Rps() {
       }
       setBalls([...ballsRef.current]);
     } else {
-      comboRef.current = 0; setCombo(0);
-      triggerFlash("#ff4c5e");
+      // MISMATCH LOGIC
+      mismatchRef.current += 1;
+      setMismatch(mismatchRef.current);
+      comboRef.current = 0; 
+      setCombo(0);
+      
+      if (mismatchRef.current >= 5) {
+        mismatchRef.current = 0;
+        setMismatch(0);
+        livesRef.current = Math.max(0, livesRef.current - 1);
+        setLives(livesRef.current);
+        addPopup(arenaRef.current?.offsetWidth/2, 100, "💔 MISMATCH PENALTY", "#ff4c5e");
+        triggerFlash("#ff4c5e");
+        const ctx = getSfxCtx(); if (ctx) playTone(ctx, 120, "sawtooth", 0.3, 0.3);
+        if (livesRef.current <= 0) endGame();
+      } else {
+        triggerFlash("#ffa500"); // Orange flash for small mismatch
+        const ctx = getSfxCtx(); if (ctx) playTone(ctx, 200, "sine", 0.1, 0.2);
+      }
     }
-  }, [addPopup, triggerFlash, getSfxCtx, isQuitting, showWaveBanner]);
+  }, [addPopup, triggerFlash, getSfxCtx, isQuitting, showWaveBanner, endGame]);
 
   const startGame = useCallback(() => {
     stopAll(); stopMusic();
     setSidebarOpen(false); setIsQuitting(false);
-    scoreRef.current = 0; comboRef.current = 0; missedRef.current = 0; livesRef.current = 3;
-    setScore(0); setLives(3); setCombo(0); setMissedCount(0);
+    scoreRef.current = 0; comboRef.current = 0; missedRef.current = 0; livesRef.current = 3; mismatchRef.current = 0;
+    setScore(0); setLives(3); setCombo(0); setMissedCount(0); setMismatch(0);
     setBalls([]); ballsRef.current = [];
     setPhase("countdown"); setCountdown(3);
     let n = 3;
@@ -322,7 +336,6 @@ export default function Rps() {
           <button className="sidebar-close" onClick={() => setSidebarOpen(false)}>✕</button>
         </div>
         
-        {/* RESTORED GAME MODE SECTION */}
         <div className="sidebar-section">
           <div className="sidebar-section-title" onClick={() => toggleSection('diff')} style={{cursor: 'pointer', display: 'flex', justifyContent: 'space-between'}}>
             GAME MODE <span>{openSection === 'diff' ? '−' : '+'}</span>
@@ -332,14 +345,12 @@ export default function Rps() {
               {Object.entries(MODES).map(([key, cfg]) => (
                 <button key={key} className={`level-btn ${mode === key ? "active" : ""} lvl-${key}`} onClick={() => setMode(key)} disabled={phase === "playing"}>
                   <span className="level-name">{cfg.label}</span>
-                  {mode === key && <span className="level-icon">✓</span>}
                 </button>
               ))}
             </div>
           )}
         </div>
 
-        {/* RESTORED AUDIO SECTION */}
         <div className="sidebar-section">
           <div className="sidebar-section-title" onClick={() => toggleSection('audio')} style={{cursor: 'pointer', display: 'flex', justifyContent: 'space-between'}}>
             Audio Settings <span>{openSection === 'audio' ? '−' : '+'}</span>
@@ -347,12 +358,11 @@ export default function Rps() {
           {openSection === 'audio' && (
             <div className="sound-toggle-row" style={{marginTop: '10px'}}>
               <span className="sound-label">Music Vol</span>
-              <input type="range" min="0" max="1" step="0.1" value={musicVol} onChange={e => setMusicVol(parseFloat(e.target.value))} style={{accentColor: '#f5c400'}} />
+              <input type="range" min="0" max="1" step="0.1" value={musicVol} onChange={e => setMusicVol(parseFloat(e.target.value))} />
             </div>
           )}
         </div>
 
-        {/* RESTORED FULL RULES */}
         <div className="sidebar-section">
             <div className="sidebar-section-title" onClick={() => toggleSection('rules')} style={{cursor: 'pointer', display: 'flex', justifyContent: 'space-between'}}>
               Game Rules <span>{openSection === 'rules' ? '−' : '+'}</span>
@@ -370,13 +380,7 @@ export default function Rps() {
 
         <div className="sidebar-footer">
           {phase === "playing" ? (
-            <>
-              <button className="resume-btn" onClick={() => { setSidebarOpen(false); startRound(); }}>Resume Game</button>
-              <button className="resume-btn" style={{borderColor: '#ff4c5e', color: '#ff4c5e', marginTop: '10px'}} 
-                      onClick={() => { setSidebarOpen(false); setIsQuitting(true); }}>
-                  End Session
-              </button>
-            </>
+            <button className="resume-btn" onClick={() => { setSidebarOpen(false); startRound(); }}>Resume</button>
           ) : (
             <button className="newgame-btn" onClick={startGame}>New Game</button>
           )}
@@ -393,6 +397,8 @@ export default function Rps() {
         <div className="rps-hud">
           <div className="hud-box"><div className="hud-label">Score</div><div className="hud-val yellow">{score}</div></div>
           <div className="hud-box"><div className="hud-label">Lives</div><div className="hud-val red">{"❤️".repeat(lives)}</div></div>
+          {/* NEW MISMATCH HUD */}
+          <div className="hud-box"><div className="hud-label">Mismatch</div><div className="hud-val orange">{mismatch} / 5</div></div>
           <div className="hud-box"><div className="hud-label">Best</div><div className="hud-val white">{highScores[mode] ?? 0}</div></div>
         </div>
 
