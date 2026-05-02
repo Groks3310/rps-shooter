@@ -6,31 +6,36 @@ const EMOJI = { rock: "🪨", paper: "📄", scissors: "✂️" };
 const BEATS = { rock: "scissors", paper: "rock", scissors: "paper" };
 
 const MODES = {
-  amateur:      { label: "Amateur",      spawnMs: 1000, maxBalls: 12, speedMult: 0.8,  bossMs: 15000 },
-  advanced:     { label: "Advanced",     spawnMs: 700,  maxBalls: 18, speedMult: 1.2,  bossMs: 10000 },
-  professional: { label: "Professional", spawnMs: 450,  maxBalls: 25, speedMult: 1.8,  bossMs: 7000  },
+  amateur:      { label: "Amateur",      spawnMs: 1000, maxBalls: 12, speedMult: 0.8 },
+  advanced:     { label: "Advanced",     spawnMs: 700,  maxBalls: 18, speedMult: 1.2 },
+  professional: { label: "Professional", spawnMs: 450,  maxBalls: 25, speedMult: 1.8 },
 };
 
 const RULES = [
-  { icon: "🛡️", text: "Bosses have 3HP & change type when hit!" },
-  { icon: "📈", text: "Speed increases as your score rises" },
-  { icon: "⚠️", text: "Misfiring resets your combo" },
+  { icon: "🪨", text: "Rock beats Scissors" },
+  { icon: "📄", text: "Paper beats Rock" },
+  { icon: "✂️", text: "Scissors beats Paper" },
+  { icon: "🛡️", text: "Bosses have 3HP & change type" },
+  { icon: "👹", text: "Bosses spawn every 7 seconds" },
+  { icon: "⚡", text: "Massive speed jump at 30 pts" },
   { icon: "🔥", text: "5x Combo recovers 1 Life!" },
 ];
 
 // ── Helpers ──
 function createBall(arenaW, arenaH, isBoss = false, speedMult = 1, currentScore = 0) {
   const type = TYPES[Math.floor(Math.random() * 3)];
-  // Scaling Difficulty: increase speed by 5% for every 10 points
-  const scale = 1 + (Math.floor(currentScore / 10) * 0.05);
-  const speed = (2 + Math.random() * 2) * speedMult * scale * (isBoss ? 0.5 : 1);
+  
+  // Scaling Logic
+  let scale = 1 + (Math.floor(currentScore / 10) * 0.1);
+  if (currentScore >= 30) scale *= 1.5; 
+
+  const speed = (2 + Math.random() * 2) * speedMult * scale * (isBoss ? 0.6 : 1);
   const angle = Math.random() * Math.PI * 2;
   
   return {
     id: Date.now() + Math.random(),
-    type, 
-    isBoss,
-    hp: isBoss ? 3 : 1, // Bosses need 3 hits
+    type, isBoss,
+    hp: isBoss ? 3 : 1,
     x: arenaW * 0.1 + Math.random() * arenaW * 0.8,
     y: -30,
     vx: Math.cos(angle) * speed * 0.7,
@@ -109,7 +114,6 @@ export default function Rps() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mode, setMode] = useState("amateur");
   const [musicVol, setMusicVol] = useState(0.4);
-
   const [openSection, setOpenSection] = useState(null);
   const [isQuitting, setIsQuitting] = useState(false);
 
@@ -130,9 +134,7 @@ export default function Rps() {
 
   useEffect(() => { modeRef.current = mode; }, [mode]);
 
-  const toggleSection = (name) => {
-    setOpenSection(openSection === name ? null : name);
-  };
+  const toggleSection = (name) => setOpenSection(openSection === name ? null : name);
 
   const stopAll = useCallback(() => {
     [spawnRef, moveRef, bossRef].forEach(r => { clearInterval(r.current); r.current = null; });
@@ -141,15 +143,6 @@ export default function Rps() {
   const getSfxCtx = useCallback(() => {
     try { return getAudioCtx(audioCtxRef); } catch { return null; }
   }, []);
-
-  const startMusic = useCallback(() => {
-    try {
-      const ctx = getAudioCtx(audioCtxRef);
-      if (!musicRef.current) musicRef.current = new MusicEngine(ctx, "./sounds/background.mp3");
-      musicRef.current.setVolume(musicVol * 0.18);
-      musicRef.current.start();
-    } catch {}
-  }, [musicVol]);
 
   const stopMusic = useCallback(() => { musicRef.current?.stop(); }, []);
 
@@ -176,14 +169,9 @@ export default function Rps() {
     const fs = scoreRef.current;
     setFinalScore(fs);
     setBalls([]); ballsRef.current = [];
-    const updated = saveHighScore(modeRef.current, fs);
-    setHighScores(updated);
+    setHighScores(saveHighScore(modeRef.current, fs));
     const ctx = getSfxCtx();
-    if (ctx) {
-        [400, 320, 240, 160].forEach((f, i) =>
-            setTimeout(() => playTone(ctx, f, "sawtooth", 0.35, 0.22), i * 180)
-        );
-    }
+    if (ctx) [400, 320, 240, 160].forEach((f, i) => setTimeout(() => playTone(ctx, f, "sawtooth", 0.35, 0.22), i * 180));
     setPhase("gameover");
     setIsQuitting(false);
   }, [stopAll, stopMusic, getSfxCtx]);
@@ -193,13 +181,19 @@ export default function Rps() {
     playingRef.current = true;
     setPhase("playing");
     setIsQuitting(false);
-    startMusic();
+    
+    // Music restoration
+    try {
+      const ctx = getAudioCtx(audioCtxRef);
+      if (!musicRef.current) musicRef.current = new MusicEngine(ctx, "./sounds/background.mp3");
+      musicRef.current.setVolume(musicVol * 0.18);
+      musicRef.current.start();
+    } catch {}
 
     spawnRef.current = setInterval(() => {
       if (!playingRef.current) return;
       if (ballsRef.current.length < cfg.maxBalls) {
         const r = arenaRef.current?.getBoundingClientRect();
-        // Passing scoreRef.current for scaling difficulty
         ballsRef.current = [...ballsRef.current, createBall(r.width, r.height, false, cfg.speedMult, scoreRef.current)];
         setBalls([...ballsRef.current]);
       }
@@ -235,69 +229,69 @@ export default function Rps() {
         const r = arenaRef.current?.getBoundingClientRect();
         ballsRef.current = [...ballsRef.current, createBall(r.width, r.height, true, cfg.speedMult, scoreRef.current)];
         setBalls([...ballsRef.current]);
-        showWaveBanner("👹 Shielded Boss!");
+        showWaveBanner("👹 BOSS ALERT!");
         const ctx = getSfxCtx(); if (ctx) playTone(ctx, 80, "sawtooth", 0.5, 0.35);
-    }, cfg.bossMs);
-  }, [endGame, showWaveBanner, triggerFlash, getSfxCtx, startMusic]);
+    }, 7000); 
+  }, [endGame, showWaveBanner, triggerFlash, getSfxCtx, musicVol, stopMusic]);
 
   const shoot = useCallback((choice) => {
     if (!playingRef.current || isQuitting) return;
-    
-    // Find balls that this choice beats
-    const targets = ballsRef.current.filter(b => beats(choice, b.type));
     const ctx = getSfxCtx();
+    const hits = ballsRef.current.filter(b => beats(choice, b.type));
 
-    if (targets.length > 0) {
+    if (hits.length > 0) {
+      let earned = 0;
       const mult = getMultiplier(comboRef.current + 1);
-      let pointsGained = 0;
 
-      // Update balls: Bosses lose HP and change type, normal balls die
       ballsRef.current = ballsRef.current.map(b => {
         if (beats(choice, b.type)) {
           if (b.isBoss && b.hp > 1) {
-            // Shielded Boss Logic: Change type and reduce HP
             addPopup(b.x, b.y, "SHIELD HIT", "#f5c400");
-            if (ctx) playTone(ctx, 300, "square", 0.1, 0.15);
             return { ...b, hp: b.hp - 1, type: TYPES[Math.floor(Math.random() * 3)] };
           } else {
-            // Ball or Boss is destroyed
-            const val = b.isBoss ? 5 : 1;
-            pointsGained += val * mult;
-            addPopup(b.x, b.y, `+${val}${mult > 1 ? ` x${mult}` : ""}`, "#00e676");
-            return null; // Marked for removal
+            earned += (b.isBoss ? 5 : 1) * mult;
+            addPopup(b.x, b.y, `+${b.isBoss ? 5 : 1}${mult > 1 ? `x${mult}` : ""}`, "#00e676");
+            return null;
           }
         }
         return b;
-      }).filter(b => b !== null);
+      }).filter(Boolean);
 
-      // Apply score and combo
-      if (pointsGained > 0) {
-        scoreRef.current += pointsGained;
+      if (earned > 0) {
+        const oldScore = scoreRef.current;
+        scoreRef.current += earned;
         setScore(scoreRef.current);
-        const newCombo = Math.min(comboRef.current + 1, 5);
-        comboRef.current = newCombo;
-        setCombo(newCombo);
-        
-        if (newCombo === 5 && livesRef.current < 3) {
-          livesRef.current++;
-          setLives(livesRef.current);
-          const r = arenaRef.current?.getBoundingClientRect();
-          addPopup(r.width/2, r.height/2, "❤️ LIFE UP", "#ff4c5e");
+        if (oldScore < 30 && scoreRef.current >= 30) showWaveBanner("⚡ SPEED UP! ⚡");
+
+        comboRef.current = Math.min(comboRef.current + 1, 5);
+        setCombo(comboRef.current);
+        if (comboRef.current === 5 && livesRef.current < 3) {
+          livesRef.current++; setLives(livesRef.current);
         }
         triggerFlash("#00e676");
-        if (ctx) playTone(ctx, 520, "square", 0.08, 0.25);
+        if (ctx) playTone(ctx, 520, "square", 0.08, 0.2);
       }
       setBalls([...ballsRef.current]);
     } else {
-      // MISFIRE PENALTY: Lose points and reset combo instantly
-      scoreRef.current = Math.max(0, scoreRef.current - 2); 
-      setScore(scoreRef.current);
-      comboRef.current = 0; 
-      setCombo(0);
+      comboRef.current = 0; setCombo(0);
       triggerFlash("#ff4c5e");
-      if (ctx) playTone(ctx, 100, "sine", 0.2, 0.3);
     }
-  }, [addPopup, triggerFlash, getSfxCtx, isQuitting]);
+  }, [addPopup, triggerFlash, getSfxCtx, isQuitting, showWaveBanner]);
+
+  const startGame = useCallback(() => {
+    stopAll(); stopMusic();
+    setSidebarOpen(false); setIsQuitting(false);
+    scoreRef.current = 0; comboRef.current = 0; missedRef.current = 0; livesRef.current = 3;
+    setScore(0); setLives(3); setCombo(0); setMissedCount(0);
+    setBalls([]); ballsRef.current = [];
+    setPhase("countdown"); setCountdown(3);
+    let n = 3;
+    const cd = setInterval(() => {
+      n--;
+      if (n <= 0) { clearInterval(cd); startRound(); }
+      else setCountdown(n);
+    }, 800);
+  }, [startRound, stopAll, stopMusic]);
 
   useEffect(() => {
     if (musicRef.current) musicRef.current.setVolume(musicVol * 0.18);
@@ -311,25 +305,8 @@ export default function Rps() {
     }
   }, [sidebarOpen, isQuitting, stopAll]);
 
-  const startGame = useCallback(() => {
-    stopAll(); stopMusic();
-    setSidebarOpen(false);
-    setIsQuitting(false);
-    scoreRef.current = 0; comboRef.current = 0; missedRef.current = 0; livesRef.current = 3;
-    setScore(0); setLives(3); setCombo(0); setMissedCount(0);
-    setBalls([]); ballsRef.current = [];
-    setPhase("countdown"); setCountdown(3);
-    let n = 3;
-    const cd = setInterval(() => {
-      n--;
-      if (n <= 0) { clearInterval(cd); startRound(); }
-      else setCountdown(n);
-    }, 800);
-  }, [startRound, stopAll, stopMusic]);
-
   const confirmQuit = () => {
-    stopAll();
-    stopMusic();
+    stopAll(); stopMusic();
     setPhase("idle");
     setIsQuitting(false);
     setSidebarOpen(false);
@@ -345,6 +322,7 @@ export default function Rps() {
           <button className="sidebar-close" onClick={() => setSidebarOpen(false)}>✕</button>
         </div>
         
+        {/* RESTORED GAME MODE SECTION */}
         <div className="sidebar-section">
           <div className="sidebar-section-title" onClick={() => toggleSection('diff')} style={{cursor: 'pointer', display: 'flex', justifyContent: 'space-between'}}>
             GAME MODE <span>{openSection === 'diff' ? '−' : '+'}</span>
@@ -361,6 +339,7 @@ export default function Rps() {
           )}
         </div>
 
+        {/* RESTORED AUDIO SECTION */}
         <div className="sidebar-section">
           <div className="sidebar-section-title" onClick={() => toggleSection('audio')} style={{cursor: 'pointer', display: 'flex', justifyContent: 'space-between'}}>
             Audio Settings <span>{openSection === 'audio' ? '−' : '+'}</span>
@@ -373,9 +352,10 @@ export default function Rps() {
           )}
         </div>
 
+        {/* RESTORED FULL RULES */}
         <div className="sidebar-section">
             <div className="sidebar-section-title" onClick={() => toggleSection('rules')} style={{cursor: 'pointer', display: 'flex', justifyContent: 'space-between'}}>
-              Hardcore Rules <span>{openSection === 'rules' ? '−' : '+'}</span>
+              Game Rules <span>{openSection === 'rules' ? '−' : '+'}</span>
             </div>
             {openSection === 'rules' && (
               <div style={{marginTop: '10px'}}>
@@ -413,7 +393,6 @@ export default function Rps() {
         <div className="rps-hud">
           <div className="hud-box"><div className="hud-label">Score</div><div className="hud-val yellow">{score}</div></div>
           <div className="hud-box"><div className="hud-label">Lives</div><div className="hud-val red">{"❤️".repeat(lives)}</div></div>
-          <div className="hud-box"><div className="hud-label">Missed</div><div className="hud-val white">{missedCount}</div></div>
           <div className="hud-box"><div className="hud-label">Best</div><div className="hud-val white">{highScores[mode] ?? 0}</div></div>
         </div>
 
@@ -427,8 +406,8 @@ export default function Rps() {
           {flashColor && <div className="arena-flash" style={{ background: flashColor }} />}
           {balls.map(b => (
             <div key={b.id} className={`ball${b.isBoss ? " boss" : ""}`} style={{ left: b.x, top: b.y }}>
-                {EMOJI[b.type]}
-                {b.isBoss && <div className="boss-hp">{"●".repeat(b.hp)}</div>}
+              {EMOJI[b.type]}
+              {b.isBoss && <div className="boss-hp">{"●".repeat(b.hp)}</div>}
             </div>
           ))}
           {popups.map(p => <div key={p.id} className="popup" style={{ left: p.x, top: p.y, color: p.color }}>{p.text}</div>)}
@@ -439,32 +418,26 @@ export default function Rps() {
               {isQuitting ? (
                 <div style={{textAlign: 'center'}}>
                   <div className="overlay-title" style={{fontSize: '24px', color: '#ff4c5e'}}>Quit Game?</div>
-                  <p style={{fontSize: '12px', color: '#ccc', marginBottom: '20px'}}>Your progress will be lost.</p>
-                  <div style={{display: 'flex', gap: '15px'}}>
-                    <button className="overlay-btn" style={{background: '#ff4c5e', fontSize: '14px', padding: '10px 25px'}} onClick={confirmQuit}>Quit</button>
-                    <button className="overlay-btn" style={{background: '#444', fontSize: '14px', padding: '10px 25px'}} onClick={() => { setIsQuitting(false); startRound(); }}>Stay</button>
+                  <div style={{display: 'flex', gap: '15px', marginTop: '20px'}}>
+                    <button className="overlay-btn" style={{background: '#ff4c5e'}} onClick={confirmQuit}>Quit</button>
+                    <button className="overlay-btn" style={{background: '#444'}} onClick={() => { setIsQuitting(false); startRound(); }}>Stay</button>
                   </div>
                 </div>
               ) : phase === "idle" ? (
                 <>
                   <div className="overlay-badge">Survival Mode</div>
                   <div className="overlay-title">RPS Shooter</div>
-                  <p>by</p>
-                  <h3 className="author">OKE RUTH GIFT</h3>
                   <button className="overlay-btn" onClick={startGame}>Start</button>
                 </>
               ) : phase === "countdown" ? (
                 <div className="countdown-num">{countdown}</div>
-              ) : phase === "gameover" ? (
+              ) : (
                 <>
                   <div className="overlay-title">Game Over</div>
-                  <div className="gameover-stats">
-                    <div className="stat"><div className="stat-label">Final Score</div><div className="stat-val yellow">{finalScore}</div></div>
-                    <div className="stat"><div className="stat-label">High Score</div><div className="stat-val white">{highScores[mode]}</div></div>
-                  </div>
+                  <div className="stat-val yellow">Score: {finalScore}</div>
                   <button className="overlay-btn" onClick={startGame}>Retry</button>
                 </>
-              ) : null}
+              )}
             </div>
           )}
         </div>
